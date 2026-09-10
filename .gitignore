@@ -1,0 +1,3 @@
+/bin/
+registry/outputs/*
+!registry/outputs/.gitkeep

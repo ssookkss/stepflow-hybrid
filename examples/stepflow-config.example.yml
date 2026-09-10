@@ -1,0 +1,61 @@
+# ---------------------------------------------------------------------------
+# stepflow-config.yml 실제 컴포넌트 설정 예시
+# ---------------------------------------------------------------------------
+# 이 파일은 engine/hybrid.go가 요청마다 동적으로 생성하는 stepflow-config.yml의
+# "실제 운영 환경에서 채워야 할 값"을 보여주기 위한 참고용 예시다.
+# 하이브리드 엔진은 요청(JSON 페이로드)만으로는 어떤 컴포넌트 플러그인이 배포되어
+# 있는지 알 수 없으므로 plugins/routes를 빈 값으로 생성하며, 실제 운영 배포 시에는
+# 이 파일의 내용을 참고하여 배포 파이프라인이 plugins/routes를 채워 넣어야 한다.
+#
+# 아래 내용은 실제 설치된 stepflow-cli(0.13.0)로 `stepflow validate` /
+# `stepflow list-components` / `stepflow run`을 직접 실행해 검증한 스키마다.
+
+plugins:
+  # 1) builtin 플러그인: stepflow-cli에 내장된 기본 컴포넌트 모음.
+  #    별도 프로세스 기동 없이 즉시 사용 가능하며, `noop`/`sleep`/`map`/`iterate`/
+  #    `load_file`/`openai` 등 10개 내장 컴포넌트를 제공한다.
+  #    (실제 목록은 `stepflow list-components --config=stepflow-config.yml` 로 확인)
+  builtin:
+    type: builtin
+
+  # 2) mcp 플러그인: 외부 MCP(Model Context Protocol) 서버를 서브프로세스로 기동해
+  #    컴포넌트를 제공받는 방식. CLAUDE.md의 Lightweight/Heavy 워크플로우에서 실행되는
+  #    Python 기반 컴포넌트(예: "analyze" 액션)를 이 방식으로 연결한다.
+  #    - command/args: MCP 서버를 기동하는 실행 커맨드
+  #    - env: 서브프로세스에 주입할 환경 변수
+  #      (CLAUDE.md 규칙에 따라 파이썬 바이트코드 캐시 충돌 방지를 위해
+  #       PYTHONDONTWRITEBYTECODE=1을 반드시 포함시킨다)
+  python-analyzer:
+    type: mcp
+    command: python3
+    args: ["-m", "stepflow_analyze_server"] # 실제 배포 시 자체 MCP 서버 모듈 경로로 교체
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+
+# routes: 워크플로우 컴포넌트 경로의 최상위 세그먼트(단일 세그먼트만 허용, 하위 경로
+# 와일드카드는 지원하지 않음)를 어떤 plugin이 처리할지 매핑한다.
+# 예) component: "/builtin/noop" 는 아래 "/builtin" 라우팅 규칙에 매칭되어
+#     builtin 플러그인이 "noop" 컴포넌트를 실행한다.
+routes:
+  "/builtin":
+    - plugin: builtin
+  "/python-analyzer":
+    - plugin: python-analyzer
+
+# ---------------------------------------------------------------------------
+# 위 설정을 사용하는 workflow.yaml(flow 파일) 최소 예시:
+#
+# name: sample-flow
+# description: builtin noop 컴포넌트를 호출하는 최소 예시
+# steps:
+#   - id: step1
+#     component: /builtin/noop
+#     input:
+#       x: 1
+# output:
+#   result: { $step: step1 }
+#
+# 검증: stepflow validate --flow=workflow.yaml --config=stepflow-config.example.yml
+# 실행: stepflow run --flow=workflow.yaml --config=stepflow-config.example.yml \
+#         --input-json='{}' --output=result.json
+# ---------------------------------------------------------------------------
